@@ -9,7 +9,7 @@ import openai
 from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound, TranscriptsDisabled, NoTranscriptAvailable
 
 # Set up OpenAI API key
-openai.api_key = 'sk-proj-MUKSbDnYqigZsIcnHkCDT3BlbkFJOjqDHXFU1lJyG0SKzqgN'
+openai.api_key = ''
 
 st.set_page_config(page_title="YouTube Video Summary", page_icon=":clapper:", layout="wide")
 
