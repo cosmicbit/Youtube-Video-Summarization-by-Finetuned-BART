@@ -1,3 +1,17 @@
+"""
+import os: Provides a way to use operating system dependent functionality like reading or writing to the file system.
+import torch: Imports PyTorch, a deep learning library.
+from datasets import Dataset: Imports the Dataset class from the Hugging Face Datasets library for handling datasets.
+from transformers import ...: Imports necessary components from the Hugging Face Transformers library:
+BartTokenizer: For tokenizing text.
+BartForConditionalGeneration: The BART model used for text generation tasks.
+Seq2SeqTrainer: A trainer class specifically for sequence-to-sequence models.
+Seq2SeqTrainingArguments: Arguments for training sequence-to-sequence models.
+TrainerCallback: Allows custom behavior during training.
+DataCollatorForSeq2Seq: Handles padding and other collating tasks for sequence-to-sequence models.
+from youtube_transcript_api import YouTubeTranscriptApi: Imports the YouTubeTranscriptApi for fetching transcripts from YouTube videos.
+import evaluate: Imports the evaluate module for metrics computation.
+"""
 import os
 import torch
 from datasets import Dataset
@@ -5,16 +19,13 @@ from transformers import BartTokenizer, BartForConditionalGeneration, Seq2SeqTra
 from youtube_transcript_api import YouTubeTranscriptApi
 import evaluate
 
-# Ensure required packages are installed
-os.system('pip install nltk rouge_score')
-
-# Function to extract video ID from URL
+"""This function extracts the video ID from a YouTube URL. If the URL contains "v=", it splits the URL at "v=" and takes the part after it."""
 def extract_video_id(url):
     if "v=" in url:
         return url.split("v=")[-1]
     return url
 
-# Function to fetch transcript for a given video ID
+"""This function fetches the transcript for a given YouTube video ID using the YouTubeTranscriptApi and concatenates all the transcript segments into a single string."""
 def get_transcript(video_id):
     transcript = YouTubeTranscriptApi.get_transcript(video_id)
     transcript_text = ' '.join([item['text'] for item in transcript])
@@ -55,6 +66,12 @@ video_urls = [
 
 
 ]
+
+"""
+video_urls: List of YouTube video URLs.
+video_ids: Extracts video IDs from the URLs using the extract_video_id function.
+transcripts: Fetches the transcripts for each video ID using the get_transcript function.
+"""
 video_ids = [extract_video_id(url) for url in video_urls]
 transcripts = [get_transcript(video_id) for video_id in video_ids]
 
@@ -92,21 +109,39 @@ summaries = [
     "Mariya Khludnevskaya explores how the human brain can achieve native fluency in two languages from an early age, challenging the notion that bilingualism is inherently difficult or confusing. Through studies at the University of Washington's Institute for Learning & Brain Sciences, Khludnevskaya and her team found that bilingual babies' brains specialize in processing both languages they are exposed to, leading to cognitive benefits such as enhanced flexible thinking. Despite common concerns, bilingualism does not slow language learning or cause confusion; rather, code-switching is a sign of linguistic sophistication. She advocates for creating environments that foster bilingualism from a young age, emphasizing that interactive, socially rich settings are crucial for language acquisition. Khludnevskaya highlights promising research in Europe aimed at integrating bilingual education into public early education, which could revolutionize language learning and help children reach their full potential."
 ]
 
-# Display the transcripts
+"""This loop prints each transcript, useful for verifying the transcripts fetched."""
 for i, transcript in enumerate(transcripts):
     print(f"Transcript for Video {i + 1}:")
     print(transcript)
     print("\n" + "-"*80 + "\n")
 
-# Create dataset
+"""
+Creates a dictionary with transcripts and summaries and then creates a Hugging Face Dataset object from this dictionary.
+"""
 data = {'transcript': transcripts, 'summary': summaries}
 dataset = Dataset.from_dict(data)
 
-# Load tokenizer and model
-tokenizer = BartTokenizer.from_pretrained('facebook/bart-large-cnn')
-model = BartForConditionalGeneration.from_pretrained('facebook/bart-large-cnn')
+"""
+Loads a pre-trained BART tokenizer and model from the specified directory.
+"""
+tokenizer = BartTokenizer.from_pretrained('./finetuned_bart_model')
+model = BartForConditionalGeneration.from_pretrained('./finetuned_bart_model')
 
-# Tokenize data
+
+"""
+The preprocess_function is designed to prepare the dataset for training a sequence-to-sequence model like BART. Here's a step-by-step breakdown:
+
+Extract Transcripts: The function takes a batch of examples and extracts the 'transcript' field from each example, creating a list of input texts.
+
+Tokenize Transcripts:It uses the BartTokenizer to convert the list of input texts into token IDs, ensuring that each sequence is no longer than 512 tokens. If a sequence is shorter, it will be padded to 512 tokens; if it is longer, it will be truncated.
+
+Tokenize Summaries: Similarly, it converts the 'summary' field from each example into token IDs with the same maximum length, padding, and truncation settings.
+
+Add Tokenized Summaries to Inputs:The tokenized summaries (labels) are added to the tokenized inputs under the 'labels' key. This structure is required by the Seq2SeqTrainer for training the model.
+
+Return Processed Data:The function returns the processed dictionary, which includes the tokenized inputs and their corresponding tokenized summaries. This processed data will be used for training the model.
+This preprocessing ensures that the inputs and targets are in the correct format and length, allowing the model to learn effectively from the provided data.
+"""
 def preprocess_function(examples):
     inputs = [doc for doc in examples['transcript']]
     model_inputs = tokenizer(inputs, max_length=512, padding='max_length', truncation=True)  # Ensure padding and truncation
@@ -117,12 +152,32 @@ def preprocess_function(examples):
     model_inputs['labels'] = labels['input_ids']
     return model_inputs
 
+
 tokenized_dataset = dataset.map(preprocess_function, batched=True)
 
 # Load metric
 rouge = evaluate.load("rouge")
 
-# Define compute_metrics function
+
+"""
+The compute_metrics function is designed to evaluate the performance of the BART model by comparing its predicted summaries against the true summaries using the ROUGE metric. Here’s a step-by-step breakdown:
+
+Unpack Predictions and Labels:The function receives a tuple containing the model's predictions and the true labels, which are unpacked into separate variables.
+
+Decode Predictions:The predicted token IDs are converted into human-readable text using the tokenizer, and special tokens are skipped to get clean summaries.
+
+Handle Special Tokens in Labels:The true labels contain -100 for ignored positions, which are replaced with the tokenizer's padding token ID to ensure they can be decoded correctly.
+
+Decode Labels:The true token IDs are converted into human-readable text using the tokenizer, and special tokens are skipped to get clean summaries.
+
+Compute ROUGE Scores:The decoded predicted summaries and true summaries are compared using the ROUGE metric, which measures the overlap of n-grams, word sequences, and word pairs between the predictions and references.
+
+Adjust and Extract Results:The computed ROUGE scores are multiplied by 100 to convert them into percentages for easier interpretation.
+
+Return Results:The function returns the adjusted ROUGE scores, which can be used to evaluate the model's performance.
+
+By following these steps, the compute_metrics function provides a clear and quantifiable way to assess how well the BART model is generating summaries compared to the true summaries.
+"""
 def compute_metrics(eval_pred):
     predictions, labels = eval_pred
     decoded_preds = tokenizer.batch_decode(predictions, skip_special_tokens=True)
@@ -137,24 +192,116 @@ def compute_metrics(eval_pred):
     return result
 
 # Training arguments
+"""
+output_dir='./results'
+Purpose: This specifies the directory where all the output files, including model checkpoints and evaluation results, will be saved.
+Usage: It ensures that you have a designated place to store training artifacts, making it easier to organize and retrieve them later.
+
+eval_strategy="epoch"
+Purpose: This sets the evaluation strategy during training. By specifying "epoch", the model will be evaluated at the end of each epoch.
+Usage: Regular evaluation helps in monitoring the model’s performance and making necessary adjustments during training.
+
+learning_rate=2e-4
+Purpose: This sets the learning rate for the optimizer. A slightly higher learning rate like 2e-4 can help in faster convergence but needs to be balanced to avoid overshooting.
+Usage: The learning rate controls how much to change the model's parameters in response to the computed gradients during training. Finding the right learning rate is crucial for effective training.
+
+per_device_train_batch_size=4
+Purpose: This sets the batch size for training on each device (e.g., each GPU).
+Usage: The batch size determines how many samples are processed before updating the model's parameters. A larger batch size can improve gradient estimation but requires more memory.
+
+per_device_eval_batch_size=4
+Purpose: This sets the batch size for evaluation on each device.
+Usage: Similar to the training batch size, but for evaluation. It should be set considering the memory constraints and the need for consistent evaluation.
+
+num_train_epochs=3
+Purpose: This specifies the number of epochs to train the model.
+Usage: An epoch is one complete pass through the entire training dataset. Training for more epochs can improve the model’s performance, but it may also lead to overfitting.
+
+weight_decay=0.01
+Purpose: This sets the weight decay (L2 regularization) rate.
+Usage: Weight decay is used to prevent overfitting by penalizing large weights in the model, effectively regularizing the model.
+
+logging_dir='./logs'
+Purpose: This specifies the directory where the logs will be saved.
+Usage: Logs are useful for tracking the training process, monitoring metrics, and debugging. The logging directory keeps these logs organized.
+
+logging_steps=50
+Purpose: This sets the interval (in steps) at which the training logs will be generated.
+Usage: Frequent logging helps in monitoring the training process closely. However, logging too frequently can slow down training.
+
+save_total_limit=1
+Purpose: This specifies the maximum number of checkpoints to keep. If the limit is exceeded, older checkpoints are deleted.
+Usage: Keeping only the most recent checkpoint saves disk space and ensures that you always have the latest model state.
+
+save_steps=500
+Purpose: This sets the interval (in steps) at which the model checkpoints will be saved.
+Usage: Regular checkpointing ensures that you can resume training from the latest state in case of interruptions. It also provides intermediate models that can be evaluated or used for further fine-tuning.
+
+predict_with_generate=True
+Purpose: This flag indicates whether to use the models generate method to predict sequences during evaluation.
+Usage: For sequence-to-sequence tasks like summarization, generation-based evaluation provides more meaningful metrics as it evaluates the actual generated text.
+g
+radient_accumulation_steps=2
+Purpose: This sets the number of steps to accumulate gradients before performing a backward/update pass.
+Usage: Gradient accumulation helps in effectively increasing the batch size without requiring additional memory. It simulates a larger batch size by accumulating gradients over multiple steps and updating the model parameters less frequently.
+
+Summary
+These parameters together control various aspects of the training process, from data handling and optimization to logging and checkpointing. Adjusting these parameters can significantly impact the efficiency, speed, and effectiveness of model training. Here's a quick summary of what each parameter does:
+output_dir: Where to save training outputs.
+eval_strategy: When to evaluate the model.
+learning_rate: Controls how much the model updates during training.
+per_device_train_batch_size: Number of training samples per batch per device.
+per_device_eval_batch_size: Number of evaluation samples per batch per device.
+num_train_epochs: Total passes through the training dataset.
+weight_decay: Regularization to prevent overfitting.
+logging_dir: Where to save log files.
+logging_steps: How often to log training metrics.
+save_total_limit: Maximum number of checkpoints to keep.
+save_steps: How often to save model checkpoints.
+predict_with_generate: Use generation for evaluation.
+gradient_accumulation_steps: Accumulate gradients over multiple steps to simulate larger batch size.
+By fine-tuning these parameters, you can optimize the training process to get the best possible performance from your model.
+"""
 training_args = Seq2SeqTrainingArguments(
     output_dir='./results',
     eval_strategy="epoch",
-    learning_rate=1e-4,  # Increase learning rate to speed up convergence
-    per_device_train_batch_size=2,  # Increase batch size to 2
-    per_device_eval_batch_size=2,
-    num_train_epochs=2,  # Reduce number of epochs to 2
+    learning_rate=2e-4,  # Slightly increased learning rate
+    per_device_train_batch_size=4,  # Increase batch size if GPU memory allows
+    per_device_eval_batch_size=4,
+    num_train_epochs=3,  # Increase to 3 epochs for better learning
     weight_decay=0.01,
     logging_dir='./logs',
-    logging_steps=10,
-    save_total_limit=2,
-    save_steps=500,
-    predict_with_generate=True
+    logging_steps=50,  # Reduce frequency of logging
+    save_total_limit=1,  # Keep only the most recent checkpoint
+    save_steps=500,  # Save less frequently if needed
+    predict_with_generate=True,
+    gradient_accumulation_steps=2  # Accumulate gradients to simulate larger batch size
 )
 
 # Initialize Trainer
+"""
+The DataCollatorForSeq2Seq ensures that each batch of input data is correctly 
+formatted and padded, which is essential for the efficient and correct training of 
+sequence-to-sequence models like BART. By using the tokenizer and the model, 
+it ensures compatibility and efficiency in data handling, facilitating a smooth training process.
+"""
 data_collator = DataCollatorForSeq2Seq(tokenizer, model=model)
 
+
+"""
+Trainer
+Model:The model is the core of the training process. For sequence-to-sequence tasks, it consists of an encoder to process the input sequence and a decoder to generate the output sequence. During training, the model's parameters are updated to minimize the loss, which measures the difference between the predicted and actual outputs.
+
+Training Arguments:These arguments control the training loop, including how many epochs to train for, the learning rate, batch sizes, logging frequency, and checkpointing behavior. Adjusting these parameters can significantly impact the training efficiency and the final performance of the model.
+
+Datasets:The training dataset provides the examples the model learns from. Each example consists of an input sequence (e.g., transcript) and a target sequence (e.g., summary). The evaluation dataset is used to periodically assess the model's performance and ensure it is learning correctly.
+
+Tokenizer:The tokenizer converts the raw text into a format the model can process (token IDs) and back into human-readable text for evaluation and inference. It ensures consistency in text processing throughout the training pipeline.
+
+Data Collator:The data collator prepares batches of data for training and evaluation. It handles padding, so all sequences in a batch are of the same length, and ensures the data is formatted correctly for the model.
+
+Metrics Function: The metrics function evaluates the model's predictions against the ground truth. By computing scores like ROUGE, it provides a quantitative measure of the model's performance. This feedback is essential for understanding how well the model is performing and for making adjustments during training.
+"""
 trainer = Seq2SeqTrainer(
     model=model,
     args=training_args,
@@ -165,7 +312,15 @@ trainer = Seq2SeqTrainer(
     compute_metrics=compute_metrics
 )
 
+
 # Custom callback to generate summaries and compute ROUGE scores
+"""The RougeCallback class provides a way to automatically generate 
+summaries and compute ROUGE scores at the end of each training epoch. 
+This custom callback helps in monitoring the model's performance and making 
+necessary adjustments during training. By evaluating the generated summaries 
+against reference summaries, it provides a clear and quantitative measure of 
+the model's summarization quality.
+"""
 class RougeCallback(TrainerCallback):
     def on_epoch_end(self, args, state, control, **kwargs):
         for i in range(len(transcripts)):
@@ -185,12 +340,22 @@ class RougeCallback(TrainerCallback):
             print(f"ROUGE Scores: {result}")
 
 # Add the custom callback to the trainer
+"""By adding this callback, you ensure that at the end of each epoch, 
+summaries will be generated for the transcripts and ROUGE scores will be computed and printed. 
+This provides ongoing feedback on the model’s performance during training."""
 trainer.add_callback(RougeCallback())
 
 # Train model
+"""This method runs the training loop according to the specifications in training_args. 
+It handles feeding batches of data to the model, computing the loss,
+ updating the model parameters using backpropagation, and periodically evaluating 
+ the model using the evaluation dataset. It also triggers any callbacks that have been added, 
+ such as the RougeCallback."""
 trainer.train()
 
 # Save the model
+"""Role: Saving the model and tokenizer allows you to reload them later for inference or further training. 
+It ensures that the fine-tuning process is preserved and can be replicated or used in production."""
 model.save_pretrained("./finetuned_bart_model")
 tokenizer.save_pretrained("./finetuned_bart_model")
 
