@@ -1,8 +1,5 @@
 import streamlit as st
 import yt_dlp
-import sys
-import torch
-from pytube import YouTube
 from transformers import BartTokenizer, BartForConditionalGeneration
 from reportlab.pdfgen import canvas
 import tempfile
