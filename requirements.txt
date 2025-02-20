@@ -1,9 +1,7 @@
 streamlit
 yt-dlp
-torch
-pytube
 transformers
 reportlab
-openai
 requests
 nltk
+torch

@@ -3,13 +3,10 @@ import yt_dlp
 from transformers import BartTokenizer, BartForConditionalGeneration
 from reportlab.pdfgen import canvas
 import tempfile
-import openai
 import requests
 import os
 import nltk
 nltk.download('punkt')
-# Set up OpenAI API key
-openai.api_key = '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'
 
 st.set_page_config(page_title="YouTube Video Summary", page_icon=":clapper:", layout="wide")
 
